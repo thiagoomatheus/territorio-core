@@ -1,0 +1,24 @@
+{
+  "name": "territorio-core",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thiagoomatheus/territorio-core.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/thiagoomatheus/territorio-core/issues"
+  },
+  "homepage": "https://github.com/thiagoomatheus/territorio-core#readme"
+}
