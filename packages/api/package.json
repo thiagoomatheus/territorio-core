@@ -1,0 +1,11 @@
+{
+  "name": "@territorio/api",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@territorio/db": "*",
+    "@trpc/server": "^11.8.1",
+    "superjson": "^2.2.6",
+    "zod": "^4.3.4"
+  }
+}
