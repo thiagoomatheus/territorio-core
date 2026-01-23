@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, uuid, numeric, jsonb, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, uuid, jsonb, pgEnum, integer } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const typeEnum = pgEnum('type', ['rural', 'comercial', 'urbano']);
@@ -7,7 +7,7 @@ export const statusEnum = pgEnum('status', ['disponivel', 'trabalhando']);
 export const congregations = pgTable('congregations', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
-  number: numeric('number').unique().notNull(),
+  number: integer('number').unique().notNull(),
   whatsappInstanceName: text('whatsapp_instance_name'),
   whatsappApiKey: text('whatsapp_api_key'),
   whatsappGroupId: text('whatsapp_group_id'),
@@ -16,7 +16,7 @@ export const congregations = pgTable('congregations', {
 
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
-  congregationId: uuid('congregation_id').references(() => congregations.id).notNull(),
+  congregationId: uuid('congregation_id').references(() => congregations.id),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   password: text('password').notNull(),
@@ -36,7 +36,7 @@ export const territories = pgTable('territories', {
   id: uuid('id').defaultRandom().primaryKey(),
   congregationId: uuid('congregation_id').references(() => congregations.id).notNull(),
   name: text('name').notNull(),
-  number: numeric('number').notNull(),
+  number: integer('number').notNull(),
   blocks: jsonb('blocks').notNull(),
   type: typeEnum('type').notNull(),
   imageUrl: text('image_url'),
