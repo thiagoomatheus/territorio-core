@@ -5,7 +5,13 @@
   "dependencies": {
     "@territorio/db": "*",
     "@trpc/server": "^11.8.1",
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3",
     "superjson": "^2.2.6",
     "zod": "^4.3.4"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "@types/jsonwebtoken": "^9.0.10"
   }
 }
