@@ -11,6 +11,8 @@ export const congregations = pgTable('congregations', {
   whatsappInstanceName: text('whatsapp_instance_name'),
   whatsappApiKey: text('whatsapp_api_key'),
   whatsappGroupId: text('whatsapp_group_id'),
+  // Controle do Wizard (0: Criada, 1: WhatsApp Conectado, 2: Grupo Configurado)
+  setupStep: integer('setup_step').default(0).notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -20,6 +22,7 @@ export const users = pgTable('users', {
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   password: text('password').notNull(),
+  role: text('role', { enum: ['owner', 'admin'] }),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -37,7 +40,7 @@ export const territories = pgTable('territories', {
   congregationId: uuid('congregation_id').references(() => congregations.id).notNull(),
   name: text('name').notNull(),
   number: integer('number').notNull(),
-  blocks: jsonb('blocks').notNull(),
+  blocks: jsonb('blocks'),
   type: typeEnum('type').notNull(),
   imageUrl: text('image_url'),
   obs: text('obs'),
