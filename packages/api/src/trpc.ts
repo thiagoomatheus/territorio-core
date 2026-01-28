@@ -7,8 +7,9 @@ export type Context = {
     db: typeof db;
     user?: {
         id: string
-        congregationId: string
-    };
+        congregationId: string | null
+        role: 'owner' | 'admin' | null
+    } | null;
 }
 
 const t = initTRPC.context<Context>().create({
@@ -29,8 +30,8 @@ const t = initTRPC.context<Context>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
-const isAuthed = t.middleware(({ ctx, next }) => {
-    if (!ctx.user || !ctx.user.congregationId) {
+const isAuthenticated = t.middleware(({ ctx, next }) => {
+    if (!ctx.user) {
         throw new TRPCError({ code: 'UNAUTHORIZED' });
     }
     return next({
@@ -41,4 +42,14 @@ const isAuthed = t.middleware(({ ctx, next }) => {
     });
 });
 
-export const protectedProcedure = t.procedure.use(isAuthed);
+const hasOrganization = t.middleware(({ ctx, next }) => {
+    if (!ctx.user || !ctx.user.congregationId) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Usuário sem organização vinculada' });
+    }
+    return next({
+        ctx: { user: { ...ctx.user, congregationId: ctx.user.congregationId } },
+    });
+});
+
+export const authenticatedProcedure = t.procedure.use(isAuthenticated);
+export const protectedProcedure = t.procedure.use(hasOrganization);
