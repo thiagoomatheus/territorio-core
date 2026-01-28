@@ -52,14 +52,14 @@ export const assignments = pgTable('assignments', {
   id: uuid('id').defaultRandom().primaryKey(),
   congregationId: uuid('congregation_id').references(() => congregations.id).notNull(),
   territoryId: uuid('territory_id').references(() => territories.id).notNull(),
-  dirigenteId: uuid('dirigente_id').references(() => managers.id).notNull(),
+  managerId: uuid('manager_id').references(() => managers.id).notNull(),
   status: text('status', { enum: ['ativo', 'concluido', 'cancelado'] }).default('ativo'),
   startedAt: timestamp('started_at').defaultNow(),
   finishedAt: timestamp('finished_at'),
 });
 
-export const congregationsRelations = relations(congregations, ({ many, one }) => ({
-  user: one(users),
+export const congregationsRelations = relations(congregations, ({ many }) => ({
+  users: many(users),
   managers: many(managers),
   territories: many(territories),
 }));
@@ -93,7 +93,7 @@ export const assignmentsRelations = relations(assignments, ({ one }) => ({
     references: [territories.id],
   }),
   manager: one(managers, {
-    fields: [assignments.dirigenteId],
+    fields: [assignments.managerId],
     references: [managers.id],
   }),
 }));
