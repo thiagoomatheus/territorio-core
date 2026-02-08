@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
     "paths": {
-      "@territorio/db/*": ["../../packages/db/src/*"]
+      "@territorio/db/*": ["../../packages/db/src/*"],
+      "@territorio/server/*": ["../../apps/server/src/*"]
     }
   }
 }
