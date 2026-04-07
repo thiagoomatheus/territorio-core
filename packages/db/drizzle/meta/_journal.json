@@ -22,6 +22,20 @@
       "when": 1769606553376,
       "tag": "0002_tearful_silverclaw",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1772596889690,
+      "tag": "0003_steady_reaper",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1773109145326,
+      "tag": "0004_spotty_tyger_tiger",
+      "breakpoints": true
     }
   ]
 }

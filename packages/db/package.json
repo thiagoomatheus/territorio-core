@@ -2,9 +2,10 @@
   "name": "@territorio/db",
   "version": "1.0.0",
   "main": "src/index.ts",
+  "types": "src/index.ts",
   "scripts": {
-    "generate": "drizzle-kit generate",
-    "migrate": "drizzle-kit migrate"
+    "generate": "drizzle-kit generate --config=drizzle.config.ts",
+    "migrate": "npx dotenv-cli -e ../../apps/server/.env -- drizzle-kit migrate --config=drizzle.config.ts"
   },
   "devDependencies": {
     "@types/node": "^25.0.3",
@@ -16,5 +17,10 @@
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.1",
     "pg": "^8.16.3"
+  },
+  "exports": {
+    ".": "./src/index.ts",        
+    "./schema": "./src/schema.ts" ,
+    "./src/schema": "./src/schema.ts" 
   }
 }

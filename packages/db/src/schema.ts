@@ -9,7 +9,6 @@ export const congregations = pgTable('congregations', {
   name: text('name').notNull(),
   number: integer('number').unique().notNull(),
   whatsappInstanceName: text('whatsapp_instance_name'),
-  whatsappApiKey: text('whatsapp_api_key'),
   whatsappGroupId: text('whatsapp_group_id'),
   // Controle do Wizard (0: Criada, 1: WhatsApp Conectado, 2: Grupo Configurado)
   setupStep: integer('setup_step').default(0).notNull(),
@@ -24,6 +23,8 @@ export const users = pgTable('users', {
   password: text('password').notNull(),
   role: text('role', { enum: ['owner', 'admin'] }),
   createdAt: timestamp('created_at').defaultNow(),
+  resetPasswordToken: text('reset_password_token'),
+  resetPasswordExpires: timestamp('reset_password_expires'),
 });
 
 export const managers = pgTable('managers', {

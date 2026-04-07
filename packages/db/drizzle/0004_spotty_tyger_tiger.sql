@@ -1,0 +1,1 @@
+ALTER TABLE "congregations" DROP COLUMN "whatsapp_api_key";
