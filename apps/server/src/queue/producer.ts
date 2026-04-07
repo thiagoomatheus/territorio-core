@@ -12,5 +12,10 @@ export async function addBotJob(name: string, data: JobData, delayMs?: number) {
         delay: delayMs,
         removeOnComplete: true,
         removeOnFail: false,
+        attempts: 3,
+        backoff: {
+            type: 'exponential',
+            delay: 1000,
+        },
     });
 }

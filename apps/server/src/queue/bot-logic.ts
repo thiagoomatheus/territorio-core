@@ -1,54 +1,81 @@
 import { db } from '@territorio/db';
 import { congregations, managers, territories, assignments } from '@territorio/db/schema';
-import { eq, and, asc, desc } from 'drizzle-orm';
-import { sendTextMessage, sendImageMessage } from '../services/evolution';
+import { eq, and, asc } from 'drizzle-orm';
 import { addBotJob } from './producer';
 import { env } from '../env';
 import { clearUserState, getUserState, setUserState } from '../services/state';
+import { sendImageMessage, sendTextMessage } from '@territorio/api/src/services/evolution';
+
+const DAYS_FOR_REMINDER_CHECK = env.DAYS_FOR_REMINDER_CHECK || 30;
+const COMANDO_SOLICITAR_TERRITORIO = env.COMANDO_SOLICITAR_TERRITORIO || "!territorio";
+const COMANDO_DEVOLVER_TERRITORIO = env.COMANDO_DEVOLVER_TERRITORIO || "!devolver";
+const LIMIT_ACTIVE_ASSIGNMENTS = env.LIMIT_ACTIVE_ASSIGNMENTS || 2;
+
 
 export async function handleIncomingMessage(payload: any, instanceName: string) {
     const data = payload.data;
     if (!data || !data.key || data.key.fromMe) return;
 
     const remoteJid = data.key.remoteJid;
-    const participant = data.key.participant || remoteJid;
+    const participant = data.key.participantAlt || remoteJid;
     const messageContent = data.message?.conversation || data.message?.extendedTextMessage?.text;
+    const pushName = data.pushName || "dirigente";
+    const isGroup = remoteJid.endsWith('@g.us');
 
     if (!messageContent) return;
     
-    const org = await db.query.congregations.findFirst({
+    const cong = await db.query.congregations.findFirst({
         where: eq(congregations.whatsappInstanceName, instanceName),
     });
 
-    if (!org || !org.whatsappApiKey) {
-        console.log(`Organização não encontrada para a instância ${instanceName}`);
+    if (!cong) {
+        console.log(`Congregação não encontrada para a instância ${instanceName}`);
         return;
     }
-    
-    if (remoteJid !== org.whatsappGroupId) {
-        return; 
-    }
-    
-    const phone = participant.split('@')[0];
 
+    const phone = participant.split('@')[0];
+    
     const manager = await db.query.managers.findFirst({
         where: and(
             eq(managers.phone, phone),
-            eq(managers.congregationId, org.id),
+            eq(managers.congregationId, cong.id),
             eq(managers.active, true)
         )
     });
 
     if (!manager) {
+        console.log(`Participante ${pushName} não é um dirigente ativo na congregação ${cong.number}. Ignorando mensagem.`);
+         await sendTextMessage({
+            instanceName, remoteJid,
+            text: `Olá! Parece que você não está registrado como dirigente na congregação. Por favor, entre em contato com o administrador para obter acesso.`
+         });
         return;
+    }
+    
+    if (manager.congregationId !== cong.id) {
+        console.log(`Mensagem recebida de ${remoteJid}, mas o grupo da congregação é ${cong.whatsappGroupId}. Ignorando.`);
+        return; 
     }
 
     const userState = await getUserState(phone);
     const text: string = messageContent.trim();
 
     if (userState.step === "IDLE") {
+
+        if (!isGroup) {
+            await sendTextMessage({
+                instanceName, remoteJid: participant,
+                text: "❌ O comando para solicitar territórios deve ser enviado apenas dentro do grupo da congregação."
+            });
+            return;
+        }
+
+        await sendTextMessage({
+            instanceName, remoteJid: remoteJid,
+            text: `Olá ${pushName}! 👋\n\nSeu comando ${text.toLowerCase()} foi recebido.\n\nVeja a mensagem que te enviamos no privado...`
+        });
         
-        if (text.toLowerCase() === env.COMANDO_SOLICITAR_TERRITORIO) {
+        if (text.toLowerCase() === COMANDO_SOLICITAR_TERRITORIO.toLowerCase()) {
             const activeAssignments = await db.query.assignments.findMany({
                 where: and(
                     eq(assignments.managerId, manager.id),
@@ -56,39 +83,36 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
                 ),
                 with: { territory: true }
             });
-    
-            const LIMIT = env.LIMIT_ACTIVE_ASSIGNMENTS;
 
-            if (activeAssignments && activeAssignments.length >= LIMIT) {
+            if (activeAssignments && activeAssignments.length >= LIMIT_ACTIVE_ASSIGNMENTS) {
                 await sendTextMessage({
-                    instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
-                    text: `⚠️ Irmão ${manager.name}, você já atingiu o limite de ${LIMIT} ${LIMIT > 1 ? 'territórios' : 'território'}.\n\n${LIMIT > 1 ? 'Territórios' : 'Território'} atuais:\n${activeAssignments.map(a => `- ${a.territory.name}`).join('\n')}\n\nPor favor, devolva um antes de solicitar outro.`
+                    instanceName, remoteJid: participant,
+                    text: `⚠️ Irmão ${pushName}, você já atingiu o limite de ${LIMIT_ACTIVE_ASSIGNMENTS} ${LIMIT_ACTIVE_ASSIGNMENTS > 1 ? 'territórios' : 'território'}.\n\n${LIMIT_ACTIVE_ASSIGNMENTS > 1 ? 'Territórios' : 'Território'} atuais:\n${activeAssignments.map(a => `- ${a.territory.name}`).join('\n')}\n\nPor favor, devolva um antes de solicitar outro.`
                 });
                 return;
             }
     
-            if (activeAssignments && activeAssignments.length > LIMIT && LIMIT > 0) {
+            if (activeAssignments && activeAssignments.length > LIMIT_ACTIVE_ASSIGNMENTS && LIMIT_ACTIVE_ASSIGNMENTS > 0) {
                 await sendTextMessage({
-                    instanceName, apiKey: org.whatsappApiKey,
-                    remoteJid: participant,
-                    text: `⚠️ Irmão ${manager.name}, você já tem ${activeAssignments.length} ${activeAssignments.length > 1 ? 'territórios designados' : 'território designado'}.
+                    instanceName, remoteJid: participant,
+                    text: `⚠️ Irmão ${pushName}, você já tem ${activeAssignments.length} ${activeAssignments.length > 1 ? 'territórios designados' : 'território designado'}.
                     ${activeAssignments.map(a => `\n- ${a.territory.name}`).join('')}
                     \nCaso já o tenha concluído, por favor, envie *${env.COMANDO_DEVOLVER_TERRITORIO}* para atualizar status do território.
-                    Limite máximo de territórios ativos por dirigente é ${LIMIT}.
+                    Limite máximo de territórios ativos por dirigente é ${LIMIT_ACTIVE_ASSIGNMENTS}.
                     `
                 });
             }
 
             await sendTextMessage({
-                instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
-                text: `Olá ${manager.name}! Que tipo de território você prefere?\n\n1️⃣ Urbano\n2️⃣ Rural\n3️⃣ Comercial\n\nResponda com o número.`
+                instanceName, remoteJid: participant,
+                text: `Olá ${pushName}! Que tipo de território você prefere?\n\n1️⃣ Urbano\n2️⃣ Rural\n3️⃣ Comercial\n\nResponda com o número.`
             });
 
             await setUserState(phone, { step: 'SELECT_TYPE' });
             return;
         }
 
-        if (text.toLowerCase() === env.COMANDO_DEVOLVER_TERRITORIO.toLowerCase()) {
+        if (text.toLowerCase() === COMANDO_DEVOLVER_TERRITORIO.toLowerCase()) {
             const activeAssignments = await db.query.assignments.findMany({
                 where: and(
                     eq(assignments.managerId, manager.id),
@@ -99,7 +123,7 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
 
             if (activeAssignments.length === 0) {
                 await sendTextMessage({
-                    instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
+                    instanceName, remoteJid: participant,
                     text: `⚠️ Você não possui territórios ativos para devolver.`
                 });
                 return;
@@ -108,7 +132,7 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
             if (activeAssignments.length === 1) {
                 const assignment = activeAssignments[0];
                 await sendTextMessage({
-                    instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
+                    instanceName, remoteJid: participant,
                     text: `Devolvendo *${assignment.territory.name}*.\n\nInforme o motivo:\n1️⃣ Concluído\n2️⃣ Não trabalhado`
                 });
                 await setUserState(phone, { step: "AWAITING_REASON", assignmentId: assignment.id });
@@ -122,7 +146,7 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
             });
 
             await sendTextMessage({
-                instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
+                instanceName, remoteJid: participant,
                 text: msg
             });
 
@@ -138,7 +162,7 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
 
         if (!selectedType) {
             await sendTextMessage({
-                instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
+                instanceName, remoteJid: participant,
                 text: `Opção inválida. Digite *1* (Urbano), *2* (Rural) ou *3* (Comercial).`
             });
             return;
@@ -146,7 +170,7 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
         
         const options = await db.query.territories.findMany({
             where: and(
-                eq(territories.congregationId, org.id),
+                eq(territories.congregationId, cong.id),
                 eq(territories.status, 'disponivel'),
                 eq(territories.type, selectedType)
             ),
@@ -156,17 +180,15 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
 
         if (options.length === 0) {
             await sendTextMessage({
-                instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
-                text: `😕 Não encontrei territórios do tipo *${selectedType}* disponíveis.
-                
-                Por favor, inicie o processo novamente com o comando *${env.COMANDO_DEVOLVER_TERRITORIO}* e escolha outro tipo ou tente novamente mais tarde.`
+                instanceName, remoteJid: participant,
+                text: `😕 Não encontrei territórios do tipo *${selectedType}* disponíveis. \n\nPor favor, inicie o processo novamente com o comando *${env.COMANDO_DEVOLVER_TERRITORIO}* e escolha outro tipo ou tente novamente mais tarde.`
             });
             await clearUserState(phone);
             return;
         }
 
         if (options.length === 1) {
-            await processAssignment(options[0], org, instanceName, participant, manager);
+            await processAssignment(options[0], cong, instanceName, participant, manager);
             await clearUserState(phone);
             return;
         }
@@ -179,7 +201,7 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
         msg += `\n\nQual você prefere? Digite 1 ou 2.`;
 
         await sendTextMessage({
-            instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
+            instanceName, remoteJid: participant,
             text: msg
         });
 
@@ -193,7 +215,7 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
 
         if (!choice) {
             await sendTextMessage({
-                instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
+                instanceName, remoteJid: participant,
                 text: `Opção inválida. Escolha uma das opções acima.`
             });
             return;
@@ -204,9 +226,9 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
         });
 
         if (selectedTerritory) {
-            await processAssignment(selectedTerritory, org, instanceName, participant, manager);
+            await processAssignment(selectedTerritory, cong, instanceName, participant, manager);
         } else {
-            await sendTextMessage({ instanceName, apiKey: org.whatsappApiKey, remoteJid: participant, text: "Erro ao buscar território." });
+            await sendTextMessage({ instanceName, remoteJid: participant, text: "Erro ao buscar território." });
         }
         
         await clearUserState(phone);
@@ -218,7 +240,7 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
 
         if (!choice) {
              await sendTextMessage({
-                instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
+                instanceName, remoteJid: participant,
                 text: `Opção inválida. Tente novamente.`
             });
             return;
@@ -231,7 +253,7 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
 
         if (assignment) {
             await sendTextMessage({
-                instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
+                instanceName, remoteJid: participant,
                 text: `Agora, informe o motivo da devolução:\n\n1️⃣ Concluído\n2️⃣ Não trabalhado`
             });
             await setUserState(phone, { step: "AWAITING_REASON", assignmentId: assignment.id });
@@ -248,7 +270,7 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
 
         if (!reason) {
             await sendTextMessage({
-                instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
+                instanceName, remoteJid: participant,
                 text: `Opção inválida. Digite *1* (Concluído) ou *2* (Não trabalhado).`
             });
             return;
@@ -261,25 +283,25 @@ export async function handleIncomingMessage(payload: any, instanceName: string) 
 
         if (!assignment) {
             await sendTextMessage({
-                instanceName, apiKey: org.whatsappApiKey, remoteJid: participant,
+                instanceName, remoteJid: participant,
                 text: `Erro ao encontrar o território para devolução. Tente novamente.`
             });
             await clearUserState(phone);
             return;
         }
         
-        await processReturn(assignment, org, instanceName, participant, manager, reason === 'concluido');
+        await processReturn(assignment, cong, instanceName, participant, manager, reason === 'concluido');
 
         await clearUserState(phone);
         return;
     }
 }
 
-async function processAssignment(territory: any, org: any, instanceName: string, remoteJid: string, manager: any) {
+async function processAssignment(territory: { status: string; name: string; id: string, imageUrl?: string | null }, org: any, instanceName: string, remoteJid: string, manager: any) {
 
     if (territory.status !== 'disponivel') {
         await sendTextMessage({
-            instanceName, apiKey: org.whatsappApiKey, remoteJid,
+            instanceName, remoteJid,
             text: `⚠️ O território ${territory.name} acabou de ser pego por outro irmão. Tente novamente.`
         });
         return;
@@ -305,17 +327,17 @@ async function processAssignment(territory: any, org: any, instanceName: string,
 
     if (territory.imageUrl) {
         await sendImageMessage({
-            instanceName, apiKey: org.whatsappApiKey, remoteJid,
+            instanceName, remoteJid,
             text: msg, imageUrl: territory.imageUrl
         });
     } else {
         await sendTextMessage({
-            instanceName, apiKey: org.whatsappApiKey, remoteJid,
+            instanceName, remoteJid,
             text: msg
         });
     }
     
-    const DAYS = env.DAYS_FOR_REMINDER_CHECK || 30;
+    const DAYS = DAYS_FOR_REMINDER_CHECK || 30;
     await addBotJob('reminder-job', {
         type: 'reminder_check',
         assignmentId: newAssignment.id,
@@ -343,8 +365,7 @@ async function processReturn(assignment: any, org: any, instanceName: string, re
     });
 
     await sendTextMessage({
-        instanceName, apiKey: org.whatsappApiKey,
-        remoteJid,
+        instanceName, remoteJid,
         text: `✅ Irmão ${manager.name}, território *${assignment.territory.name}* devolvido como *${concluded ? 'Concluído' : 'Não trabalhado'}* com sucesso!`
     });
 }
