@@ -1,34 +1,58 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../trpc";
-import { statusEnum, territories } from "@territorio/db/schema";
+import { statusEnum, territories, typeEnum } from "@territorio/db/schema";
 import { eq, and, desc, asc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 
 const statusEnumValues = statusEnum.enumValues as [string, ...string[]];
-const typeEnumValues = statusEnum.enumValues as [string, ...string[]];
+const typeEnumValues = typeEnum.enumValues as [string, ...string[]];
 
 type StatusEnum = "disponivel" | "trabalhando";
 type TypeEnum = "rural" | "comercial" | "urbano";
 
+const HouseSchema = z.object({
+    id: z.string(),
+    number: z.string(),
+    visited: z.boolean().default(false),
+});
+
+const StreetSchema = z.object({
+    id: z.string(),
+    name: z.string().min(1, "Nome da rua obrigatório"),
+    houses: z.array(HouseSchema).default([]),
+});
+
+const BlockSchema = z.object({
+    id: z.string(),
+    number: z.string().min(1, "Número/Nome da quadra obrigatório"),
+    streets: z.array(StreetSchema).default([]),
+});
+
 const TerritorySchema = z.object({
-  id: z.uuid(),
-  congregationId: z.uuid(),
-  name: z.string(),
-  number: z.number(),
-  blocks: z.union([z.array(z.array(z.string())), z.null()]).transform(val => 
-    typeof val === 'string' ? JSON.parse(val) : val
-  ),
-  type: z.enum(typeEnumValues).nullable(),
-  imageUrl: z.string().nullable(),
-  obs: z.string().nullable(),
-  status: z.enum(statusEnumValues),
-  lastWorkedAt: z.date(),
-  createdAt: z.date(),
+    id: z.uuid(),
+    congregationId: z.uuid(),
+    name: z.string().min(3, "Nome do território deve conter pelo menos 3 caracteres"),
+    number: z.coerce.number().min(1, "Número do território deve ser maior que 0"),
+    blocks: z.array(BlockSchema).optional().default([]),
+    type: z.enum(typeEnumValues).nullable(),
+    imageUrl: z.string().nullable(),
+    obs: z.string().nullable(),
+    status: z.enum(statusEnumValues),
+    lastWorkedAt: z.date().nullable(),
+    createdAt: z.date().nullable(),
+    assignments: z.array(z.object({
+        id: z.string().uuid(),
+        status: z.string(),
+        manager: z.object({
+            id: z.uuid(),
+            name: z.string(),
+        }).nullable().optional(),
+    })).optional(),
 });
 
 const SuccessResponse = z.object({
-  message: z.string(),
-  id: z.uuid(),
+    message: z.string(),
+    id: z.uuid(),
 });
 
 export const territoryRouter = router({
@@ -53,11 +77,22 @@ export const territoryRouter = router({
             const results = await ctx.db.query.territories.findMany({
                 where: and(...filters),
                 orderBy: [order],
+                with: {
+                    assignments: {
+                        where: (table, { eq }) => eq(table.status, 'ativo'),
+                        with: { manager: true }
+                    }
+                }
             });
             
             return results.map(territory => ({
                 ...territory,
                 blocks: typeof territory.blocks === 'string' ? JSON.parse(territory.blocks) : territory.blocks,
+                assignments: territory.assignments.map(a => ({
+                    id: a.id,
+                    status: a.status || 'ativo',
+                    manager: a.manager ? { id: a.manager.id, name: a.manager.name } : undefined,
+                })),
             }));
     }),
     
@@ -84,9 +119,9 @@ export const territoryRouter = router({
         .input(z.object({
             name: z.string().min(1, "Nome é obrigatório"),
             number: z.number(),
-            blocks: z.array(z.array(z.string())).optional(),
+            blocks: z.array(BlockSchema).optional(),
             type: z.enum(typeEnumValues),
-            imageUrl: z.url("URL inválida").optional().or(z.literal('')),
+            imageUrl: z.url("URL inválida").nullable().or(z.literal('')),
             obs: z.string().optional(),
             lastWorkedAt: z.date()
         }))
@@ -114,10 +149,10 @@ export const territoryRouter = router({
             id: z.uuid(),
             name: z.string().min(1).optional(),
             number: z.number().optional(),
-            blocks: z.array(z.array(z.string())).optional(),
+            blocks: z.array(BlockSchema).optional(),
             type: z.enum(typeEnumValues).optional(),
             obs: z.string().optional(),
-            imageUrl: z.string().optional(),
+            imageUrl: z.string().nullable(),
             status: z.enum(statusEnumValues).optional(),
             lastWorkedAt: z.date().optional(),
         }))
