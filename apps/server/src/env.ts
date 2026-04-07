@@ -4,6 +4,9 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 const envSchema = z.object({
+
+    ADMIN_EMAIL: z.email().optional(),
+    ADMIN_PASSWORD: z.string().min(8).optional(),
     
     PORT: z.coerce.number().default(3333),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -18,7 +21,6 @@ const envSchema = z.object({
     WEBHOOK_SECRET: z.string().optional(), 
 
     EVOLUTION_API_URL: z.url(),
-    EVOLUTION_API_GLOBAL_KEY: z.string().optional(),
 
     DAYS_FOR_REMINDER_CHECK: z.coerce.number().default(15).optional(),
 
@@ -35,6 +37,10 @@ const envSchema = z.object({
     STORAGE_USE_SSL: z.string().transform((s) => s === 'true').default(false),
     
     STORAGE_PUBLIC_URL: z.url(),
+
+    RESEND_API_KEY: z.string().optional(),
+
+    VITE_API_URL: z.url().default('http://localhost:3333'),
 });
 
 const _env = envSchema.safeParse(process.env);

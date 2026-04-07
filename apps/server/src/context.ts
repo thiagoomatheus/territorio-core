@@ -4,8 +4,8 @@ import { db } from '@territorio/db';
 import { env } from './env';
 
 interface JwtPayload {
-  userId: string;
-  organizationId: string | null;
+  id: string;
+  congregationId: string | null;
   role: 'owner' | 'admin' | null;
 }
 
@@ -21,8 +21,8 @@ export const createContext = ({ req }: CreateFastifyContextOptions) => {
 
             const decoded = verify(token, env.JWT_SECRET) as JwtPayload;
             return {
-                id: decoded.userId,
-                organizationId: decoded.organizationId,
+                id: decoded.id,
+                congregationId: decoded.congregationId, 
                 role: decoded.role
             };
         } catch (err) {
