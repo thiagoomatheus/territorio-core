@@ -1,8 +1,13 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../trpc";
-import { managers } from "@territorio/db/schema";
+import { congregations, managers } from "@territorio/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { sendTextMessage, updateGroupParticipants } from "../services/evolution";
+import { env } from "../env";
+
+const TERRITORY_COMAND = env.COMANDO_SOLICITAR_TERRITORIO
+const RETURN_COMAND = env.COMANDO_DEVOLVER_TERRITORIO
 
 const ManagerSchema = z.object({
     id: z.uuid(),
@@ -18,7 +23,7 @@ const ManagerWhithAssignmentsSchema = ManagerSchema.extend({
         congregationId: z.string(),
         territoryId: z.string(),
         managerId: z.string(),
-        status: z.string(),
+        status: z.enum(['ativo', 'concluido', 'cancelado']).nullable(),
         startedAt: z.date().nullable(),
         finishedAt: z.date().nullable(),
     }))
@@ -64,12 +69,36 @@ export const managersRouter = router({
                 throw new TRPCError({ code: 'CONFLICT', message: 'Telefone já cadastrado para outro dirigente.' });
             }
 
+            const cong = await ctx.db.query.congregations.findFirst({
+                where: eq(congregations.id, ctx.user.congregationId)
+            });
+
             const [newManager] = await ctx.db.insert(managers).values({
                 congregationId: ctx.user.congregationId,
                 name: input.name,
                 phone: input.phone,
                 active: true
             }).returning();
+
+            if (cong?.whatsappInstanceName && cong?.whatsappGroupId) {
+                try {
+                    await updateGroupParticipants({
+                        instanceName: cong.whatsappInstanceName,
+                        groupJid: cong.whatsappGroupId,
+                        participants: [`${input.phone}@s.whatsapp.net`],
+                        action: "add"
+                    });
+                    console.log(`📡 Comando enviado para adicionar ${input.phone} ao grupo.`);
+
+                    await sendTextMessage({
+                        instanceName: cong.whatsappInstanceName,
+                        remoteJid: `${input.phone}@s.whatsapp.net`,
+                        text: `Olá ${input.name}! Você foi adicionado como dirigente no sistema de territórios. Digite ${TERRITORY_COMAND} no grupo para solicitar um território ou ${RETURN_COMAND} para devolver um território.`
+                    });
+                } catch (e) {
+                    console.error("Falha ao adicionar participante via API", e);
+                }
+            }
 
             return newManager;
     }),
@@ -83,20 +112,50 @@ export const managersRouter = router({
         }))
         .output(ManagerSchema)
         .mutation(async ({ ctx, input }) => {
-            const [updated] = await ctx.db.update(managers)
-                .set({
-                    name: input.name,
-                    phone: input.phone,
-                    active: input.active
-                })
-                .where(and(
-                    eq(managers.id, input.id),
-                    eq(managers.congregationId, ctx.user.congregationId)
-                ))
-                .returning();
+            const oldManager = await ctx.db.query.managers.findFirst({
+            where: eq(managers.id, input.id)
+        });
 
-            if (!updated) throw new TRPCError({ code: 'NOT_FOUND' });
-            return updated;
+        if (!oldManager) throw new TRPCError({ code: 'NOT_FOUND' });
+        
+        const [updatedManager] = await ctx.db.update(managers)
+            .set({
+                name: input.name,
+                phone: input.phone,
+                active: input.active
+            })
+            .where(and(
+                eq(managers.id, input.id),
+                eq(managers.congregationId, ctx.user.congregationId)
+            ))
+            .returning();
+
+        // 3. LÓGICA DE SINCRONIZAÇÃO WHATSAPP
+        // Só dispara se o campo 'active' foi enviado no input E ele é diferente do que estava no banco
+        const statusChanged = input.active !== undefined && input.active !== oldManager.active;
+
+        if (statusChanged) {
+            // Busca dados da congregação
+            const cong = await ctx.db.query.congregations.findFirst({
+                where: eq(congregations.id, ctx.user.congregationId)
+            });
+
+            if (cong?.whatsappInstanceName && cong?.whatsappGroupId) {
+                try {
+                    await updateGroupParticipants({
+                        instanceName: cong.whatsappInstanceName,
+                        groupJid: cong.whatsappGroupId,
+                        participants: [`${updatedManager.phone}@s.whatsapp.net`],
+                        action: updatedManager.active ? "add" : "remove"
+                    });
+                    console.log(`📡 Sincronização automática: ${updatedManager.name} foi ${updatedManager.active ? 'adicionado' : 'removido'} do grupo.`);
+                } catch (e) {
+                    console.error("⚠️ Falha na sincronização com WhatsApp no update:", e);
+                }
+            }
+        }
+
+        return updatedManager;
     }),
     
     toggleActive: protectedProcedure
@@ -114,9 +173,9 @@ export const managersRouter = router({
     
     byId: protectedProcedure
         .input(z.object({ id: z.uuid() }))
-        .output(ManagerWhithAssignmentsSchema)
+        .output(ManagerWhithAssignmentsSchema.nullable())
         .query(async ({ ctx, input }) => {
-            return await ctx.db.query.managers.findFirst({
+            const manager = await ctx.db.query.managers.findFirst({
                 where: and(
                     eq(managers.id, input.id),
                     eq(managers.congregationId, ctx.user.congregationId)
@@ -125,5 +184,7 @@ export const managersRouter = router({
                     assignments: true
                 }
             });
+
+            return manager || null;
     })
 });

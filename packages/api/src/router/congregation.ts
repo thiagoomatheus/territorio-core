@@ -12,7 +12,6 @@ const CongregationSchema = z.object({
     name: z.string(),
     number: z.number(),
     whatsappInstanceName: z.string().nullable(),
-    whatsappApiKey: z.string().nullable(),
     whatsappGroupId: z.string().nullable(),
     setupStep: z.number(),
     createdAt: z.date().nullable(),
@@ -110,7 +109,6 @@ export const congregationRouter = router({
         .input(z.object({
             name: z.string().optional(),
             whatsappInstanceName: z.string().optional(),
-            whatsappApiKey: z.string().optional(),
             whatsappGroupId: z.string().optional(),
             setupStep: z.number().optional()
         }))
@@ -123,9 +121,12 @@ export const congregationRouter = router({
             return updated;
         }),
         
-    get: protectedProcedure
+    get: authenticatedProcedure
         .output(CongregationSchema.nullable())
         .query(async ({ ctx }) => {
+
+            if (!ctx.user.congregationId) return null;
+
             const congregation = await ctx.db.query.congregations.findFirst({
                 where: eq(congregations.id, ctx.user.congregationId)
             });
