@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../trpc";
-import { assignments, territories, managers } from "@territorio/db/schema";
+import { assignments, territories, managers, congregations } from "@territorio/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { sendImageMessage, sendTextMessage } from "../services/evolution";
 
 const AssignmentListSchema = z.object({
   id: z.uuid(),
-  status: z.enum(['ativo', 'concluido', 'cancelado']),
+  status: z.enum(['ativo', 'concluido', 'cancelado']).nullable(),
   startedAt: z.date().nullable(),
   finishedAt: z.date().nullable(),
   territory: z.object({
@@ -15,20 +16,20 @@ const AssignmentListSchema = z.object({
     status: z.string(),
     number: z.number(),
     blocks: z.union([z.array(z.array(z.string())), z.null()]).transform(val => 
-      typeof val === 'string' ? JSON.parse(val) : val
+        typeof val === 'string' ? JSON.parse(val) : val
     ),
     type: z.enum(['rural', 'comercial', 'urbano']).nullable(),
     imageUrl: z.string().nullable(),
     obs: z.string().nullable(),
     lastWorkedAt: z.date().nullable(),
-    createdAt: z.date(),
+    createdAt: z.date().nullable(),
   }),
   manager: z.object({
     id: z.uuid(),
     name: z.string(),
     phone: z.string(),
-    active: z.boolean(),
-    createdAt: z.date(),
+    active: z.boolean().nullable(),
+    createdAt: z.date().nullable(),
   }),
 });
 
@@ -43,6 +44,7 @@ export const assignmentRouter = router({
         .input(z.object({
             territoryId: z.uuid(),
             managerId: z.uuid(),
+            sendWhatsApp: z.boolean().default(true),
         }))
         .output(SimpleSuccessResponse)
         .mutation(async ({ ctx, input }) => {
@@ -71,8 +73,20 @@ export const assignmentRouter = router({
                     )
                 });
 
+                const cong = await tx.query.congregations.findFirst({
+                    where: eq(congregations.id, ctx.user.congregationId)
+                });
+
                 if (!manager) {
                     throw new TRPCError({ code: 'NOT_FOUND', message: 'Dirigente não encontrado.' });
+                }
+
+                if (!manager.active) {
+                    throw new TRPCError({ code: 'CONFLICT', message: 'O dirigente está inativo.' });
+                }
+
+                if (!cong) {
+                    throw new TRPCError({ code: 'NOT_FOUND', message: 'Congregação não encontrada.' });
                 }
                 
                 const activeAssignment = await tx.query.assignments.findFirst({
@@ -98,6 +112,35 @@ export const assignmentRouter = router({
                 .set({ status: 'trabalhando' })
                 .where(eq(territories.id, input.territoryId));
 
+                if (input.sendWhatsApp && manager) {
+                    const msg = `🗺️ *Território Designado*\n\nOlá ${manager.name}, o administrador te designou o território: *${territory.name}*.\n\nBom trabalho!`;
+                    
+                    try {
+
+                        if (!cong.whatsappInstanceName) {
+                            console.warn("Instância do WhatsApp não configurada. Não foi possível enviar a notificação.");
+                            return { message: 'Território atribuído, mas instância do WhatsApp não configurada.', assignmentId: newAssignment.id };
+                        }
+
+                        if (territory.imageUrl) {
+                            await sendImageMessage({
+                                instanceName: cong.whatsappInstanceName,
+                                remoteJid: `${manager.phone}@s.whatsapp.net`,
+                                text: msg,
+                                imageUrl: territory.imageUrl
+                            });
+                        } else {
+                            await sendTextMessage({
+                                instanceName: cong.whatsappInstanceName,
+                                remoteJid: `${manager.phone}@s.whatsapp.net`,
+                                text: msg
+                            });
+                        }
+                    } catch (e) {
+                        console.error("Erro ao enviar notificação de designação manual");
+                    }
+                }
+
                 return { message: 'Território atribuído com sucesso.', assignmentId: newAssignment.id };
             });
     }),
@@ -105,6 +148,7 @@ export const assignmentRouter = router({
     complete: protectedProcedure
         .input(z.object({
             assignmentId: z.uuid(),
+            concluded: z.boolean().default(true),
         }))
         .output(SimpleSuccessResponse)
         .mutation(async ({ ctx, input }) => {
@@ -123,16 +167,19 @@ export const assignmentRouter = router({
                 
                 await tx.update(assignments)
                 .set({ 
-                    status: 'concluido',
+                    status: input.concluded ? 'concluido' : 'cancelado',
                     finishedAt: new Date()
                 })
                 .where(eq(assignments.id, input.assignmentId));
+
+                const updateData: any = { status: 'disponivel' };
+                
+                if (input.concluded) {
+                updateData.lastWorkedAt = new Date();
+                }
                 
                 await tx.update(territories)
-                .set({ 
-                    status: 'disponivel',
-                    lastWorkedAt: new Date()
-                })
+                .set(updateData)
                 .where(eq(territories.id, assignment.territoryId));
 
                 return { message: 'Território devolvido.', assignmentId: input.assignmentId };
@@ -197,8 +244,8 @@ export const assignmentRouter = router({
             return assignmentsFiltered.map(a => ({
                 id: a.id,
                 status: a.status,
-                startedAt: a.startedAt,
-                finishedAt: a.finishedAt,
+                startedAt: a.startedAt || null,
+                finishedAt: a.finishedAt || null,
                 territory: {
                     ...a.territory,
                     blocks: typeof a.territory.blocks === 'string' ? JSON.parse(a.territory.blocks) : a.territory.blocks,
